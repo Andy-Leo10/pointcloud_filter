@@ -21,13 +21,17 @@ public:
   {
     // --- Define ROS Parameters ---
     // Topics
-    this->declare_parameter<std::string>("pointcloud_topic", "/rslidar_points");
-    this->declare_parameter<std::string>("filtered_pc_topic", "/rslidar_points_filtered");
-    this->declare_parameter<std::string>("laser_scan_topic", "/scan");
+    this->declare_parameter<std::string>("pointcloud_topic", "/ouster/points");
+    this->declare_parameter<std::string>("filtered_pc_topic", "/ouster/points_filtered");
+    this->declare_parameter<std::string>("laser_scan_topic", "/scang");
     // Filtering Parameters
-    this->declare_parameter<float>("min_height", -0.335 - 0.2339 + 0.05);
-    this->declare_parameter<float>("max_height", 0.5);
-    this->declare_parameter<bool>("filter_rings", true);
+    this->declare_parameter<float>("min_x", -1.4);
+    this->declare_parameter<float>("max_x", 0.75);
+    this->declare_parameter<float>("min_y", -0.25);
+    this->declare_parameter<float>("max_y", 1.2);
+    this->declare_parameter<float>("min_height", -1.0);
+    this->declare_parameter<float>("max_height", 1.0);
+    this->declare_parameter<bool>("filter_rings", false);
     this->declare_parameter<bool>("filter_height", true);
     this->declare_parameter<bool>("publish_filtered_pointcloud", true);
     this->declare_parameter<bool>("publish_laserscan", true);
@@ -53,8 +57,53 @@ public:
       pointcloud_topic, 10,
       std::bind(&PointCloudFilter::pointCloudCallback, this, std::placeholders::_1));
 
-    // --- Get ROS Parameters ---
-    // Get parameters
+    // --- Parameter callback for dynamic reconfigure ---
+    parameter_callback_handle_ = this->add_on_set_parameters_callback(
+      std::bind(&PointCloudFilter::onParameterChange, this, std::placeholders::_1)
+    );
+
+    // --- Initialize parameters ---
+    update_parameters();
+  }
+
+private:
+  // Parameter callback
+  rcl_interfaces::msg::SetParametersResult onParameterChange(const std::vector<rclcpp::Parameter> &params)
+  {
+    for (const auto &param : params)
+    {
+      if (param.get_name() == "min_height") min_height_ = param.as_double();
+      else if (param.get_name() == "max_height") max_height_ = param.as_double();
+      else if (param.get_name() == "min_x") min_x_ = param.as_double();
+      else if (param.get_name() == "max_x") max_x_ = param.as_double();
+      else if (param.get_name() == "min_y") min_y_ = param.as_double();
+      else if (param.get_name() == "max_y") max_y_ = param.as_double();
+      else if (param.get_name() == "filter_rings") filter_rings_ = param.as_bool();
+      else if (param.get_name() == "filter_height") filter_height_ = param.as_bool();
+      else if (param.get_name() == "publish_filtered_pointcloud") pub_filtered_pointcloud_ = param.as_bool();
+      else if (param.get_name() == "publish_laserscan") pub_laserscan_ = param.as_bool();
+      else if (param.get_name() == "scan_angle_min") scan_angle_min_ = param.as_double();
+      else if (param.get_name() == "scan_angle_max") scan_angle_max_ = param.as_double();
+      else if (param.get_name() == "scan_angle_increment") scan_angle_increment_ = param.as_double();
+      else if (param.get_name() == "scan_range_min") scan_range_min_ = param.as_double();
+      else if (param.get_name() == "scan_range_max") scan_range_max_ = param.as_double();
+    }
+    // Recalculate num_bins_ if relevant parameters changed
+    num_bins_ = static_cast<int>((scan_angle_max_ - scan_angle_min_) / scan_angle_increment_) + 1;
+    RCLCPP_INFO(this->get_logger(), "Parameters updated dynamically.");
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "success";
+    return result;
+  }
+
+  // Helper to initialize parameters at startup
+  void update_parameters()
+  {
+    this->get_parameter("min_x", min_x_);
+    this->get_parameter("max_x", max_x_);
+    this->get_parameter("min_y", min_y_);
+    this->get_parameter("max_y", max_y_);
     this->get_parameter("min_height", min_height_);
     this->get_parameter("max_height", max_height_);
     this->get_parameter("filter_rings", filter_rings_);
@@ -66,35 +115,9 @@ public:
     this->get_parameter("scan_angle_increment", scan_angle_increment_);
     this->get_parameter("scan_range_min", scan_range_min_);
     this->get_parameter("scan_range_max", scan_range_max_);
-
-    // Calculate the number of bins in the LaserScan message
-    num_bins_ = static_cast<int>((scan_angle_max_ - scan_angle_min_) / scan_angle_increment_) + 1; // Add once, since that is ROS standard.
-
-    RCLCPP_DEBUG(this->get_logger(), 
-    "PointCloud filter node has started with the following parameters:\n"
-    "min_height: %f\n"
-    "max_height: %f\n"
-    "filter_rings: %s\n"
-    "filter_height: %s\n"
-    "publish_filtered_pointcloud: %s\n"
-    "publish_laserscan: %s\n"
-    "scan_angle_min: %f\n"
-    "scan_angle_max: %f\n"
-    "scan_angle_increment: %f\n"
-    "scan_range_min: %f\n"
-    "scan_range_max: %f\n"
-    "num_bins: %d",
-    min_height_, max_height_,
-    filter_rings_ ? "true" : "false",
-    filter_height_ ? "true" : "false",
-    pub_filtered_pointcloud_ ? "true" : "false",
-    pub_laserscan_ ? "true" : "false",
-    scan_angle_min_, scan_angle_max_, scan_angle_increment_,
-    scan_range_min_, scan_range_max_,
-    num_bins_);
+    num_bins_ = static_cast<int>((scan_angle_max_ - scan_angle_min_) / scan_angle_increment_) + 1;
   }
 
-private:
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
   {
     // --- Step 0: Detect if the incoming pointcloud has intensity data ---
@@ -172,7 +195,8 @@ private:
     {
       for (const auto & pt : intermediate_cloud->points)
       {
-        if (pt.z >= min_height_ && pt.z <= max_height_)
+        if (pt.z >= min_height_ && pt.z <= max_height_ &&
+            (pt.x < min_x_ || pt.x > max_x_ || pt.y < min_y_ || pt.y > max_y_))
         {
           height_filtered_cloud->points.push_back(pt);
         }
@@ -262,8 +286,13 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_pc_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laser_scan_pub_;
-
+  OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
+  
   // Filtering parameters
+  float min_x_;
+  float max_x_;
+  float min_y_;
+  float max_y_;
   float min_height_;
   float max_height_;
   bool filter_rings_;
