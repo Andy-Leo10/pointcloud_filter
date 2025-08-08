@@ -42,6 +42,7 @@ public:
     this->declare_parameter<float>("scan_angle_increment", 2 * M_PI / 1023.0);
     this->declare_parameter<float>("scan_range_min", 0.3);
     this->declare_parameter<float>("scan_range_max", 75.0);
+    this->declare_parameter<std::string>("laserscan_frame", "base_footprint");
 
     // --- Get Topic Names ---
     std::string pointcloud_topic, filtered_pc_topic, laser_scan_topic;
@@ -89,6 +90,7 @@ private:
       else if (param.get_name() == "scan_angle_increment") scan_angle_increment_ = param.as_double();
       else if (param.get_name() == "scan_range_min") scan_range_min_ = param.as_double();
       else if (param.get_name() == "scan_range_max") scan_range_max_ = param.as_double();
+      else if (param.get_name() == "laserscan_frame") laserscan_frame_ = param.as_string();
     }
     // Recalculate num_bins_ if relevant parameters changed
     num_bins_ = static_cast<int>((scan_angle_max_ - scan_angle_min_) / scan_angle_increment_) + 1;
@@ -117,6 +119,7 @@ private:
     this->get_parameter("scan_angle_increment", scan_angle_increment_);
     this->get_parameter("scan_range_min", scan_range_min_);
     this->get_parameter("scan_range_max", scan_range_max_);
+    this->get_parameter("laserscan_frame", laserscan_frame_);
     num_bins_ = static_cast<int>((scan_angle_max_ - scan_angle_min_) / scan_angle_increment_) + 1;
   }
 
@@ -273,6 +276,10 @@ private:
 
     sensor_msgs::msg::LaserScan scan_msg;
     scan_msg.header = header;
+    // Set frame_id if laserscan_frame_ is not empty
+    if (!laserscan_frame_.empty()) {
+      scan_msg.header.frame_id = laserscan_frame_;
+    }    
     scan_msg.angle_min = scan_angle_min_;
     scan_msg.angle_max = scan_angle_max_;
     scan_msg.angle_increment = scan_angle_increment_;
@@ -324,6 +331,7 @@ private:
   float scan_range_min_;
   float scan_range_max_;
   int num_bins_;
+  std::string laserscan_frame_;
 };
 
 int main(int argc, char ** argv)
