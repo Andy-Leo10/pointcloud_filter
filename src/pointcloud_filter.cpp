@@ -26,21 +26,22 @@ public:
     this->declare_parameter<std::string>("laser_scan_topic", "/scang");
     // Filtering Parameters
     this->declare_parameter<float>("min_x", -1.4);
-    this->declare_parameter<float>("max_x", 0.75);
+    this->declare_parameter<float>("max_x", 0.25);
     this->declare_parameter<float>("min_y", -0.25);
     this->declare_parameter<float>("max_y", 1.2);
-    this->declare_parameter<float>("min_height", -1.0);
-    this->declare_parameter<float>("max_height", 1.0);
+    this->declare_parameter<float>("min_z", -1.0);
+    this->declare_parameter<float>("max_z", 1.0);
     this->declare_parameter<bool>("filter_rings", false);
-    this->declare_parameter<bool>("filter_height", true);
+    this->declare_parameter<bool>("filter_box", true);
+    this->declare_parameter<bool>("obtain_outside_box", true);
     this->declare_parameter<bool>("publish_filtered_pointcloud", true);
     this->declare_parameter<bool>("publish_laserscan", true);
     // LaserScan Parameters
     this->declare_parameter<float>("scan_angle_min", -M_PI);
     this->declare_parameter<float>("scan_angle_max", M_PI);
-    this->declare_parameter<float>("scan_angle_increment", M_PI / 180.0 / 10.0);
-    this->declare_parameter<float>("scan_range_min", 0.2);
-    this->declare_parameter<float>("scan_range_max", 200.0);
+    this->declare_parameter<float>("scan_angle_increment", 2 * M_PI / 1023.0);
+    this->declare_parameter<float>("scan_range_min", 0.3);
+    this->declare_parameter<float>("scan_range_max", 75.0);
 
     // --- Get Topic Names ---
     std::string pointcloud_topic, filtered_pc_topic, laser_scan_topic;
@@ -72,14 +73,15 @@ private:
   {
     for (const auto &param : params)
     {
-      if (param.get_name() == "min_height") min_height_ = param.as_double();
-      else if (param.get_name() == "max_height") max_height_ = param.as_double();
+      if (param.get_name() == "min_z") min_z_ = param.as_double();
+      else if (param.get_name() == "max_z") max_z_ = param.as_double();
       else if (param.get_name() == "min_x") min_x_ = param.as_double();
       else if (param.get_name() == "max_x") max_x_ = param.as_double();
       else if (param.get_name() == "min_y") min_y_ = param.as_double();
       else if (param.get_name() == "max_y") max_y_ = param.as_double();
       else if (param.get_name() == "filter_rings") filter_rings_ = param.as_bool();
-      else if (param.get_name() == "filter_height") filter_height_ = param.as_bool();
+      else if (param.get_name() == "filter_box") filter_box_ = param.as_bool();
+      else if (param.get_name() == "obtain_outside_box") obtain_outside_box_ = param.as_bool();
       else if (param.get_name() == "publish_filtered_pointcloud") pub_filtered_pointcloud_ = param.as_bool();
       else if (param.get_name() == "publish_laserscan") pub_laserscan_ = param.as_bool();
       else if (param.get_name() == "scan_angle_min") scan_angle_min_ = param.as_double();
@@ -104,10 +106,10 @@ private:
     this->get_parameter("max_x", max_x_);
     this->get_parameter("min_y", min_y_);
     this->get_parameter("max_y", max_y_);
-    this->get_parameter("min_height", min_height_);
-    this->get_parameter("max_height", max_height_);
+    this->get_parameter("min_z", min_z_);
+    this->get_parameter("max_z", max_z_);
     this->get_parameter("filter_rings", filter_rings_);
-    this->get_parameter("filter_height", filter_height_);
+    this->get_parameter("obtain_outside_box", obtain_outside_box_);
     this->get_parameter("publish_filtered_pointcloud", pub_filtered_pointcloud_);
     this->get_parameter("publish_laserscan", pub_laserscan_);
     this->get_parameter("scan_angle_min", scan_angle_min_);
@@ -189,24 +191,38 @@ private:
       intermediate_cloud = input_cloud;
     }
 
-    // --- Step 3: Apply Height Filtering (if enabled) ---
-    pcl::PointCloud<pcl::PointXYZI>::Ptr height_filtered_cloud(new pcl::PointCloud<pcl::PointXYZI>());
-    if (filter_height_)
-    {
-      for (const auto & pt : intermediate_cloud->points)
+    // --- Step 3: Apply BOX Filtering (get outside) ---
+    pcl::PointCloud<pcl::PointXYZI>::Ptr box_filtered_cloud(new pcl::PointCloud<pcl::PointXYZI>());
+    if (filter_box_) {
+      if (obtain_outside_box_)
       {
-        if (pt.z >= min_height_ && pt.z <= max_height_ &&
-            (pt.x < min_x_ || pt.x > max_x_ || pt.y < min_y_ || pt.y > max_y_))
+        for (const auto & pt : intermediate_cloud->points)
         {
-          height_filtered_cloud->points.push_back(pt);
+          if (pt.z >= min_z_ && pt.z <= max_z_ &&
+              (pt.x < min_x_ || pt.x > max_x_ || pt.y < min_y_ || pt.y > max_y_))
+          {
+            box_filtered_cloud->points.push_back(pt);
+          }
         }
       }
+      else
+      {
+        for (const auto & pt : intermediate_cloud->points)
+        {
+          if (pt.z >= min_z_ && pt.z <= max_z_ &&
+              pt.x >= min_x_ && pt.x <= max_x_ &&
+              pt.y >= min_y_ && pt.y <= max_y_)
+          {
+            box_filtered_cloud->points.push_back(pt);
+          }
+        }
+      }
+      box_filtered_cloud->header = intermediate_cloud->header;
     }
-    else
-    {
-      height_filtered_cloud = intermediate_cloud;
+    else {
+      // No box filtering, just copy the input
+      box_filtered_cloud = intermediate_cloud;
     }
-    height_filtered_cloud->header = intermediate_cloud->header;
 
     // --- Step 4: Publish the Filtered 3D Point Cloud ---
     if(pub_filtered_pointcloud_)
@@ -215,13 +231,13 @@ private:
       // Otherwise, convert to a point cloud without intensity.
       if (has_intensity)
       {
-        publishFilteredPointCloud(msg->header, height_filtered_cloud);
+        publishFilteredPointCloud(msg->header, box_filtered_cloud);
       }
       else
       {
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_no_intensity(new pcl::PointCloud<pcl::PointXYZ>());
-        cloud_no_intensity->header = height_filtered_cloud->header;
-        for (const auto & pt : height_filtered_cloud->points)
+        cloud_no_intensity->header = box_filtered_cloud->header;
+        for (const auto & pt : box_filtered_cloud->points)
         {
           pcl::PointXYZ pt_xyz;
           pt_xyz.x = pt.x;
@@ -238,7 +254,7 @@ private:
 
     // --- Step 5: Create and Publish a 2D LaserScan Message ---
     // LaserScan generation uses only spatial coordinates, so intensity is irrelevant.
-    if (pub_laserscan_) publishLaserScan(msg->header, height_filtered_cloud);
+    if (pub_laserscan_) publishLaserScan(msg->header, box_filtered_cloud);
   }
 
 
@@ -293,10 +309,11 @@ private:
   float max_x_;
   float min_y_;
   float max_y_;
-  float min_height_;
-  float max_height_;
+  float min_z_;
+  float max_z_;
   bool filter_rings_;
-  bool filter_height_;
+  bool filter_box_;
+  bool obtain_outside_box_;
   bool pub_filtered_pointcloud_;
   bool pub_laserscan_;
 
