@@ -11,6 +11,11 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
+# my additions
+# find_package(tf2_ros REQUIRED)
+# find_package(geometry_msgs REQUIRED)
+# find_package(Eigen3 REQUIRED)
+# find_package(tf2_eigen REQUIRED)
 # We require at least common and filters components from PCL.
 find_package(PCL REQUIRED COMPONENTS common filters)
 
@@ -27,13 +32,22 @@ ament_target_dependencies(pointcloud_filter
   rclcpp
   sensor_msgs
   pcl_conversions
+  # tf2_ros
+  # geometry_msgs
+  # tf2_eigen
 )
 target_link_libraries(pointcloud_filter ${PCL_LIBRARIES})
+# target_link_libraries(pointcloud_filter ${PCL_LIBRARIES} Eigen3::Eigen)
 
 # Install the executable
 install(TARGETS
   pointcloud_filter
   DESTINATION lib/${PROJECT_NAME})
+
+# Install launch files
+install(DIRECTORY launch config
+  DESTINATION share/${PROJECT_NAME}/
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

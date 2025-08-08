@@ -13,6 +13,12 @@
 #include <pcl/common/common.h>
 #include <pcl/filters/filter.h>   
 
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <pcl/common/transforms.h>
+#include <Eigen/Dense>
+#include <tf2_eigen/tf2_eigen.hpp>
+
 class PointCloudFilter : public rclcpp::Node
 {
 public:
@@ -42,7 +48,7 @@ public:
     this->declare_parameter<float>("scan_angle_increment", 2 * M_PI / 1023.0);
     this->declare_parameter<float>("scan_range_min", 0.3);
     this->declare_parameter<float>("scan_range_max", 75.0);
-    this->declare_parameter<std::string>("laserscan_frame", ""); // PENDING WORK: need to transform the laser scan frame
+    this->declare_parameter<std::string>("laserscan_frame", "base_footprint");
 
     // --- Get Topic Names ---
     std::string pointcloud_topic, filtered_pc_topic, laser_scan_topic;
@@ -58,6 +64,10 @@ public:
     pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
       pointcloud_topic, 10,
       std::bind(&PointCloudFilter::pointCloudCallback, this, std::placeholders::_1));
+
+    // --- Others ---
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     // --- Parameter callback for dynamic reconfigure ---
     parameter_callback_handle_ = this->add_on_set_parameters_callback(
@@ -273,35 +283,66 @@ private:
   {
     if (cloud->points.empty())
       return;
+    
+    // try {
+    //   geometry_msgs::msg::TransformStamped transform = tf_buffer_->lookupTransform(
+    //       laserscan_frame_, header.frame_id, rclcpp::Time(0), rclcpp::Duration::from_seconds(1.0));
+    //   const auto & t = transform.transform.translation;
+    //   RCLCPP_INFO(this->get_logger(), "Frame1 (%s) to Frame2 (%s):",
+    //              header.frame_id.c_str(), laserscan_frame_.c_str());
+    //   RCLCPP_INFO(this->get_logger(), "Distance between frames: x=%.2f, y=%.2f, z=%.2f",
+    //              t.x, t.y, t.z);
+    // } catch (const tf2::TransformException &ex) {
+    //   RCLCPP_WARN(this->get_logger(), "Could not compute distance between frames: %s", ex.what());
+    // }  
 
+    // If a transform is needed, do it first
+    if (!laserscan_frame_.empty() && laserscan_frame_ != header.frame_id) {
+      geometry_msgs::msg::TransformStamped transform;
+      try {
+        transform = tf_buffer_->lookupTransform(
+          laserscan_frame_, header.frame_id, rclcpp::Time(0), rclcpp::Duration::from_seconds(1.0));
+        Eigen::Affine3d eigen_transform = tf2::transformToEigen(transform);
+  
+        pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud(new pcl::PointCloud<pcl::PointXYZI>());
+        pcl::transformPointCloud(*cloud, *transformed_cloud, eigen_transform);
+  
+        // Use the new frame in the header
+        std_msgs::msg::Header new_header = header;
+        new_header.frame_id = laserscan_frame_;
+        publishLaserScan(new_header, transformed_cloud);
+        return;
+      } catch (const tf2::TransformException &ex) {
+        RCLCPP_WARN(this->get_logger(), "Could not transform point cloud: %s", ex.what());
+        // Optionally, fall back to original cloud/frame
+      }
+    }  
+
+    // Now generate the LaserScan in the correct frame
     sensor_msgs::msg::LaserScan scan_msg;
     scan_msg.header = header;
-    // Set frame_id if laserscan_frame_ is not empty
-    if (!laserscan_frame_.empty()) {
-      scan_msg.header.frame_id = laserscan_frame_;
-    }    
     scan_msg.angle_min = scan_angle_min_;
     scan_msg.angle_max = scan_angle_max_;
     scan_msg.angle_increment = scan_angle_increment_;
     scan_msg.range_min = scan_range_min_;
     scan_msg.range_max = scan_range_max_;
     scan_msg.ranges.resize(num_bins_, std::numeric_limits<float>::infinity());
-
+  
     for (const auto & pt : cloud->points)
     {
       float angle = std::atan2(pt.y, pt.x);
       float range = std::hypot(pt.x, pt.y);
-
+  
       if (range < scan_range_min_ || range > scan_range_max_)
         continue;
-
+  
       int index = static_cast<int>((angle - scan_msg.angle_min) / scan_msg.angle_increment);
       if (index >= 0 && index < num_bins_)
       {
         scan_msg.ranges[index] = std::min(scan_msg.ranges[index], range);
       }
     }
-
+  
     laser_scan_pub_->publish(scan_msg);
   }
 
@@ -332,6 +373,8 @@ private:
   float scan_range_max_;
   int num_bins_;
   std::string laserscan_frame_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 };
 
 int main(int argc, char ** argv)
