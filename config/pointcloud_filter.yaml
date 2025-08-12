@@ -2,7 +2,7 @@
   ros__parameters:
     pointcloud_topic: "/ouster/points"
     filtered_pc_topic: "/ouster/points_filtered"
-    laser_scan_topic: "/scang"
+    laser_scan_topic: "/scan"
     min_x: -1.4
     max_x: 0.25
     min_y: -0.25

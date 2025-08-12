@@ -23,7 +23,7 @@ public:
     // Topics
     this->declare_parameter<std::string>("pointcloud_topic", "/ouster/points");
     this->declare_parameter<std::string>("filtered_pc_topic", "/ouster/points_filtered");
-    this->declare_parameter<std::string>("laser_scan_topic", "/scang");
+    this->declare_parameter<std::string>("laser_scan_topic", "/scan");
     // Filtering Parameters
     this->declare_parameter<float>("min_x", -1.4);
     this->declare_parameter<float>("max_x", 0.25);
@@ -44,6 +44,9 @@ public:
     this->declare_parameter<float>("scan_range_max", 75.0);
     this->declare_parameter<std::string>("laserscan_frame", ""); // PENDING WORK: need to transform the laser scan frame
 
+    // --- Initialize parameters ---
+    update_parameters();
+
     // --- Get Topic Names ---
     std::string pointcloud_topic, filtered_pc_topic, laser_scan_topic;
     this->get_parameter("pointcloud_topic", pointcloud_topic);
@@ -63,9 +66,6 @@ public:
     parameter_callback_handle_ = this->add_on_set_parameters_callback(
       std::bind(&PointCloudFilter::onParameterChange, this, std::placeholders::_1)
     );
-
-    // --- Initialize parameters ---
-    update_parameters();
   }
 
 private:
@@ -111,6 +111,7 @@ private:
     this->get_parameter("min_z", min_z_);
     this->get_parameter("max_z", max_z_);
     this->get_parameter("filter_rings", filter_rings_);
+    this->get_parameter("filter_box", filter_box_);
     this->get_parameter("obtain_outside_box", obtain_outside_box_);
     this->get_parameter("publish_filtered_pointcloud", pub_filtered_pointcloud_);
     this->get_parameter("publish_laserscan", pub_laserscan_);
