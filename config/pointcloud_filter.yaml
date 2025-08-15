@@ -19,4 +19,5 @@
     scan_angle_increment: 0.006143
     scan_range_min: 0.3
     scan_range_max: 75.0
-    laserscan_frame: ""
+    laser_input_frame: "lidarX"
+    laser_output_frame: "base_footprint" # empty if no transform is needed

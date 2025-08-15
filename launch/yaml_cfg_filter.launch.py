@@ -14,14 +14,14 @@ def launch_setup(context, *args, **kwargs):
     config_file_path = os.path.join(package_directory, 'config', config_file)
     use_sim_time = use_sim_time_str.lower() in ['true', '1', 'yes']
     
-    syncro_drive_node = Node(
+    pcl_filter_node = Node(
         package='pointcloud_filter',
         executable='pointcloud_filter',
         output='screen',
         parameters=[config_file_path],
     )
 
-    return [syncro_drive_node]
+    return [pcl_filter_node]
 
 def generate_launch_description():
     declare_pkg_name = DeclareLaunchArgument(

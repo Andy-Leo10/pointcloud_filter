@@ -10,7 +10,7 @@ def generate_launch_description():
             parameters=[{
                 'pointcloud_topic': '/ouster/points',
                 'filtered_pc_topic': '/ouster/points_filtered',
-                'laser_scan_topic': '/scang',
+                'laser_scan_topic': '/scan',
                 'min_x': -1.4,
                 'max_x': 0.25,
                 'min_y': -0.25,
@@ -27,7 +27,8 @@ def generate_launch_description():
                 'scan_angle_increment': 0.006143,
                 'scan_range_min': 0.3,
                 'scan_range_max': 75.0,
-                'laserscan_frame': 'base_footprint'
+                'laser_input_frame': 'lidarX',
+                'laser_output_frame': 'base_footprint', # empty if no transform is needed
             }]
         )
     ])

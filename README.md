@@ -8,6 +8,10 @@
 - **Filters out points belonging to the robot's own structure**.
 - **Converts a 3D point cloud into a 2D `LaserScan`** for navigation and SLAM.
 - **Optimized using C++ & PCL** for real-time performance.
+- **Easily configure via rqt** or command line parameters.
+- **Output frame transform** if needed.
+## Limitations
+- **Output frame transform** requires that axis are aligned (no rotations between frames)
 
 ---
 
@@ -24,13 +28,23 @@ Build the package using `colcon` and source the workspace.
 ## Usage
 
 ### **Launch the PointCloud Filter Node**
-Run the node to start filtering LiDAR point clouds.
+Use run or launch to start the node.
+```
+ros2 run pointcloud_filter pointcloud_filter 
+ros2 run pointcloud_filter pointcloud_filter --ros-args -p laser_output_frame:="base_footprint"
+```
+```
+ros2 launch pointcloud_filter filterPCL_and_convertLS.launch.py
+```
+```
+ros2 launch pointcloud_filter yaml_cfg_filter.launch.py
+```
 
 ### **Subscribed Topics**
-- `/rslidar_points` (`sensor_msgs/PointCloud2`) - Raw LiDAR point cloud input.
+- `/ouster/points` (`sensor_msgs/PointCloud2`) - Raw LiDAR point cloud input.
 
 ### **Published Topics**
-- `/rslidar_points_filtered` (`sensor_msgs/PointCloud2`) - The filtered 3D point cloud.
+- `/ouster/points_filtered` (`sensor_msgs/PointCloud2`) - The filtered 3D point cloud.
 - `/scan` (`sensor_msgs/LaserScan`) - The projected 2D laser scan.
 
 ---

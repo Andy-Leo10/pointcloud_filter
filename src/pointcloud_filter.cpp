@@ -13,6 +13,10 @@
 #include <pcl/common/common.h>
 #include <pcl/filters/filter.h>   
 
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+
 class PointCloudFilter : public rclcpp::Node
 {
 public:
@@ -42,7 +46,8 @@ public:
     this->declare_parameter<float>("scan_angle_increment", 2 * M_PI / 1023.0);
     this->declare_parameter<float>("scan_range_min", 0.3);
     this->declare_parameter<float>("scan_range_max", 75.0);
-    this->declare_parameter<std::string>("laserscan_frame", ""); // PENDING WORK: need to transform the laser scan frame
+    this->declare_parameter<std::string>("laser_input_frame", "lidarX");
+    this->declare_parameter<std::string>("laser_output_frame", "");
 
     // --- Initialize parameters ---
     update_parameters();
@@ -56,6 +61,10 @@ public:
     // --- Publishers ---
     filtered_pc_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(filtered_pc_topic, 10);
     laser_scan_pub_  = this->create_publisher<sensor_msgs::msg::LaserScan>(laser_scan_topic, 10);
+
+    // --- Initialize TF Buffer and Listener ---
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     // --- Subscribers ---
     pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -90,7 +99,8 @@ private:
       else if (param.get_name() == "scan_angle_increment") scan_angle_increment_ = param.as_double();
       else if (param.get_name() == "scan_range_min") scan_range_min_ = param.as_double();
       else if (param.get_name() == "scan_range_max") scan_range_max_ = param.as_double();
-      else if (param.get_name() == "laserscan_frame") laserscan_frame_ = param.as_string();
+      else if (param.get_name() == "laser_input_frame") laser_input_frame_ = param.as_string();
+      else if (param.get_name() == "laser_output_frame") laser_output_frame_ = param.as_string();
     }
     // Recalculate num_bins_ if relevant parameters changed
     num_bins_ = static_cast<int>((scan_angle_max_ - scan_angle_min_) / scan_angle_increment_) + 1;
@@ -120,7 +130,8 @@ private:
     this->get_parameter("scan_angle_increment", scan_angle_increment_);
     this->get_parameter("scan_range_min", scan_range_min_);
     this->get_parameter("scan_range_max", scan_range_max_);
-    this->get_parameter("laserscan_frame", laserscan_frame_);
+    this->get_parameter("laser_input_frame", laser_input_frame_);
+    this->get_parameter("laser_output_frame", laser_output_frame_);
     num_bins_ = static_cast<int>((scan_angle_max_ - scan_angle_min_) / scan_angle_increment_) + 1;
   }
 
@@ -275,11 +286,15 @@ private:
     if (cloud->points.empty())
       return;
 
+    // Initialize offsets in case we need to apply a translation
+    float dx = 0.0f;
+    float dy = 0.0f;
+    float dz = 0.0f;
     sensor_msgs::msg::LaserScan scan_msg;
     scan_msg.header = header;
-    // Set frame_id if laserscan_frame_ is not empty
-    if (!laserscan_frame_.empty()) {
-      scan_msg.header.frame_id = laserscan_frame_;
+    // Set frame_id if laser_output_frame_ is not empty
+    if (!laser_output_frame_.empty()) {
+      scan_msg.header.frame_id = laser_output_frame_;
     }    
     scan_msg.angle_min = scan_angle_min_;
     scan_msg.angle_max = scan_angle_max_;
@@ -288,10 +303,33 @@ private:
     scan_msg.range_max = scan_range_max_;
     scan_msg.ranges.resize(num_bins_, std::numeric_limits<float>::infinity());
 
+    if (!laser_output_frame_.empty()) {
+      // Get the translation between the input frame and the output frame
+      geometry_msgs::msg::TransformStamped transform_stamped;
+      try {
+        transform_stamped = tf_buffer_->lookupTransform(laser_input_frame_, laser_output_frame_, tf2::TimePointZero);
+      }
+      catch (const tf2::TransformException &ex) {
+        RCLCPP_WARN(this->get_logger(), "Could not get transform: %s to %s: %s",
+                    laser_input_frame_.c_str(), laser_output_frame_.c_str(), ex.what());
+        return;
+      }
+      // Extracting translation values
+      const auto & translation = transform_stamped.transform.translation;
+      dx = translation.x;
+      dy = translation.y;
+      dz = translation.z;(void)dz;
+      // RCLCPP_INFO(this->get_logger(), "Translation offsets: x=%.2f, y=%.2f, z=%.2f", dx, dy, dz);
+    }
+
+    // Convert point cloud to laser scan + apply translation offsets
     for (const auto & pt : cloud->points)
     {
-      float angle = std::atan2(pt.y, pt.x);
-      float range = std::hypot(pt.x, pt.y);
+      float translated_x = pt.x - dx;
+      float translated_y = pt.y - dy;
+
+      float angle = std::atan2(translated_y, translated_x);
+      float range = std::hypot(translated_x, translated_y);
 
       if (range < scan_range_min_ || range > scan_range_max_)
         continue;
@@ -311,6 +349,8 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_pc_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laser_scan_pub_;
   OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   
   // Filtering parameters
   float min_x_;
@@ -332,7 +372,8 @@ private:
   float scan_range_min_;
   float scan_range_max_;
   int num_bins_;
-  std::string laserscan_frame_;
+  std::string laser_input_frame_;
+  std::string laser_output_frame_;
 };
 
 int main(int argc, char ** argv)
